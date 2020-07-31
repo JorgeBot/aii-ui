@@ -5,15 +5,18 @@
                 <el-breadcrumb-item>角色管理</el-breadcrumb-item>
             </el-breadcrumb>
         </div>
-        <div class="container">
+        <div class="container" v-loading="toggles.deleteContainerLoading">
             <div class="handle-box">
-                <el-button type="primary" @click="addRoleVisible=true">新建角色</el-button>
-                <el-button type="primary" @click="patchMenusAndResources">保存</el-button>
+                <el-button type="primary" @click="toggles.addRoleVisible=true" v-bind:disabled="permission.createRole">新建角色
+                </el-button>
+                <el-button type="primary" :loading="toggles.saveButtonLoading" @click="patchMenusAndResources"
+                           v-bind:disabled="permission.save">保存
+                </el-button>
             </div>
             <div class="content">
                 <!-- 角色列表-->
                 <el-table
-                        :data="role"
+                        :data="roles.data"
                         border
                         highlight-current-row
                         class="roles"
@@ -28,13 +31,14 @@
                                     type="text"
                                     icon="el-icon-edit"
                                     @click="patchRole(scope.$index, scope.row)"
+                                    v-bind:disabled="permission.edit"
                             >编辑
                             </el-button>
                             <el-button
                                     type="text"
                                     icon="el-icon-delete"
                                     class="red"
-                                    @click="handleDelete(scope.$index, scope.row)"
+                                    @click="deleteRole(scope.$index, scope.row)"
                             >删除
                             </el-button>
                         </template>
@@ -44,13 +48,13 @@
                 <div class="menus">
                     <h6>菜单</h6>
                     <el-tree
-                            :data="menuTree"
+                            :data="menus.data"
                             show-checkbox
                             default-expand-all
-                            @node-click="getResources"
+                            @node-click="getResourceList"
                             node-key="name"
                             ref="menu"
-                            :default-checked-keys="checkedNode"
+                            @check-change="clearResourcesChecked"
                             :props="defaultProps">
                     </el-tree>
                 </div>
@@ -58,19 +62,21 @@
                 <div class="resources">
                     <h6>资源</h6>
                     <el-tree
-                            :data="resources"
+                            :data="resources.data"
                             default-expand-all
+                            check-on-click-node
                             show-checkbox
                             node-key="name"
                             ref="resource"
-                            :default-checked-keys="checkedResources"
+                            :default-checked-keys="resources.checked"
+                            @check-change="setResourceMp"
                             :props="defaultProps">
                     </el-tree>
                 </div>
 
             </div>
             <!-- 新增modal-->
-            <el-dialog title="新建角色" :visible.sync="addRoleVisible" ref="addUserForm" v-dialogDrag width="300">
+            <el-dialog title="新建角色" :visible.sync="toggles.addRoleVisible" ref="addUserForm" v-dialogDrag width="300">
                 <el-form :model="roleForm" :rules="roleFormRule">
                     <el-form-item label="角色名" prop="username">
                         <el-input v-model="roleForm.roleName" autocomplete="off"></el-input>
@@ -78,14 +84,14 @@
 
                 </el-form>
                 <div slot="footer" class="dialog-footer">
-                    <el-button @click="addRoleVisible = false">取 消</el-button>
-                    <el-button type="primary" @click="saveRole">确 定</el-button>
+                    <el-button @click="toggles.addRoleVisible = false">取 消</el-button>
+                    <el-button type="primary" @click="saveRole" :loading="toggles.postButtonLoading">确 定</el-button>
                 </div>
             </el-dialog>
             <!-- 修改modal-->
             <el-dialog
                     title="修改信息"
-                    :visible.sync="editRoleVisible"
+                    :visible.sync="toggles.editRoleVisible"
                     ref="editUserForm"
                     v-dialogDrag
             >
@@ -95,8 +101,8 @@
                     </el-form-item>
                 </el-form>
                 <div slot="footer" class="dialog-footer">
-                    <el-button @click="editRoleVisible=false">取 消</el-button>
-                    <el-button type="primary" @click="editRole">确 定</el-button>
+                    <el-button @click="toggles.editRoleVisible=false">取 消</el-button>
+                    <el-button type="primary" @click="editRole" :loading="toggles.patchButtonLoading">确 定</el-button>
                 </div>
             </el-dialog>
         </div>
@@ -104,121 +110,194 @@
 </template>
 <script>
     import axios from 'axios'
+    import domain from '../../../../public/domain'
     import qs from 'qs'
 
     export default {
         data() {
             return {
-                role: [],
-                menuTree: [],
-                checkedNode: [],
-                selectedRoleId: '',
-                resources: [],
-                checkedResources: [],
-                addRoleVisible: false,
-                roleForm: {
-                    roleName: '',
+                permission: {
+                    createRole: false,
+                    save: false,
+                    edit: false,
+                    delete: false
+                },
+                roles: {
+                    data: [],
+                    clicked: '',
+                },
+                menus: {
+                    data: [],
+                },
+                resources: {
+                    data: [],
+                    checked: []
                 },
                 roleFormRule: {
                     roleName: [
                         {required: true, message: "请输入角色名", trigger: "blur"}
                     ],
                 },
-                editRoleVisible: false,
-                editRoleForm: {
-                    roleName: '',
-                },
                 editRoleRule: {
                     roleName: [
                         {required: true, message: "请输入角色名", trigger: "blur"}
                     ],
                 },
+                roleForm: {
+                    roleName: '',
+                },
+                editRoleForm: {
+                    roleName: '',
+                },
                 defaultProps: {
                     children: 'children',
                     label: 'name'
                 },
+                toggles: {
+                    addRoleVisible: false,
+                    editRoleVisible: false,
+                    saveButtonLoading: false,
+                    postButtonLoading: false,
+                    patchButtonLoading: false,
+                    deleteContainerLoading: false,
+                }
             };
         }
         ,
         methods: {
             getRoles() {
-                axios.get('role').then(res => {
-                    this.role = res.data
+                axios.get('roles').then(res => {
+                    this.roles.data = res.data
                 })
             },
             getMenus(row, col, env) {
                 if (col.label === "角色名") {
-                    this.selectedRoleId = row.id
-                    axios.get(`/role/${row.id}/menus`).then(res => {
-                        this.menuTree = res.data.menuTree;
-                        this.checkedNode = res.data.checkedNode;
-                        this.resources = []
-                    })
+                    this.roles.clicked = row
+                    this.resources.data = []
+                    this.menus.data = domain.menu
+                    if (row.menus) {
+                        this.$refs.menu.setCheckedKeys(row.menus);
+                    } else {
+                        this.$refs.menu.setCheckedKeys([]);
+                    }
                 }
             },
-            getResources(obj, node, self) {
-                this.resources = []
-                let _this = this
-                if (obj.isLeaf) {
-                    new Promise(function (resolve, reject) {
-                        axios.get(`/role/${_this.selectedRoleId}/menu/${obj.id}/resources`).then(res => {
-                            res.data.resources.forEach(e => {
-                                _this.resources.push({name: e})
-                            })
-                            resolve(res.data.checkedNode)
+            getResourceList(obj, node, self) {
+                this.resources.data = []
+                // 获取资源
+                axios.get(`/resources`, {params: {menuName: obj.name}}).then(res => {
+                    let data = res.data
+                    if (data) {
+                        data.forEach(e => {
+                            this.resources.data.push({name: e})
                         })
-                    }).then(checkedNode => {
-                        _this.checkedResources = checkedNode
-                    })
-                }
+                    }
+                    return data
+                }).then(res => {    // 获取选中资源
+                    if (res && node.checked) {
+                        let checkedNode = res.filter(f => this.roles.clicked.resources.some(e => e === f));
+                        this.$refs.resource.setCheckedKeys(checkedNode);
+                    }
+                })
             },
             saveRole() {
+                this.toggles.postButtonLoading = true
                 axios.post('role', qs.stringify(this.roleForm)).then(res => {
                     this.$message({
                         message: '保存成功',
                         type: 'success'
                     });
-                    this.addRoleVisible = false
+                    this.toggles.addRoleVisible = false
                     this.getRoles()
                 }).catch(err => {
                     this.$message.error('保存失败')
+                }).finally(() => {
+                    this.roleForm.roleName = ''
+                    this.toggles.postButtonLoading = false
                 })
             },
             patchMenusAndResources() {
                 let menus = this.$refs.menu.getCheckedKeys()
-                let resources = this.$refs.resource.getCheckedKeys()
-                axios.patch(`role/${this.selectedRoleId}/menus`, menus).then(res => {
-                    axios.patch(`role/${this.selectedRoleId}/resources`, resources).then(r => {
-                        this.$message({
-                            message: '保存成功',
-                            type: 'success'
-                        });
-                    }).catch(error => {
-                        this.$message.error('保存资源时出错')
-                    })
-                }).catch(err => {
-                    this.$message.error('保存菜单时出错')
+                let resources = this.roles.clicked.resources
+                this.toggles.saveButtonLoading = true
+                axios.patch(`role/${this.roles.clicked.id}`, qs.stringify({
+                    menus: menus,
+                    resources: resources
+                })).then(res => {
+                    this.toggles.saveButtonLoading = false
+                    this.getRoles()
+                    this.$alert('保存成功', {confirmButtonText: '确定'});
                 })
             },
             patchRole(index, row) {
-                this.editRoleVisible = true;
+                this.toggles.editRoleVisible = true;
                 this.editRoleForm = Object.assign({}, row);
             },
+            deleteRole(index, row) {
+                this.toggles.deleteContainerLoading = true
+                axios.delete(`role/${row.id}`).then(() => {
+                    this.$message({
+                        message: '删除成功',
+                        type: 'success'
+                    });
+                    this.getRoles()
+                }).catch(() => {
+                    this.$message.error('删除失败')
+                }).finally(() => {
+                    this.toggles.deleteContainerLoading = false
+                })
+            },
             editRole() {
+                this.toggles.patchButtonLoading = true
                 axios.patch(`role/${this.editRoleForm.id}`, qs.stringify(this.editRoleForm)).then(res => {
                     this.$message({
                         message: '修改成功',
                         type: 'success'
                     });
-                    this.editRoleVisible = false;
                     this.getRoles()
                 }).catch(err => {
                     this.$message.error('修改失败')
+                }).finally(() => {
+                    this.toggles.patchButtonLoading = false
+                    this.toggles.editRoleVisible = false
                 })
-            }
+            },
+            setResourceMp(data, isAdd) {
+                if (!new Set(this.$refs.menu.getCheckedKeys()).has(this.$refs.menu.getCurrentKey())) {
+                    this.$refs.resource.setCheckedKeys([])
+                }
+                let resourceSet = new Set(this.roles.clicked.resources);
+                if (isAdd) {
+                    resourceSet.add(data.name)
+                } else {
+                    resourceSet.delete(data.name)
+                }
+                this.roles.clicked.resources = Array.from(resourceSet)
+            },
+            /**
+             * 菜单取消勾选时，同时取消资源的勾选
+             * @param menu
+             * @param checked
+             */
+            clearResourcesChecked(menu, checked) {
+                if (!checked) {
+                    if (this.$refs.menu.getCurrentKey() === menu.name) {
+                        this.$refs.resource.setCheckedKeys([])
+                    }
+                }
+            },
+            getResources() {
+                let resources = new Set(JSON.parse(localStorage.getItem("ms_resources")))
+                if (domain.permission) {
+                    this.permission.createRole = !resources.has("新建角色")
+                    this.permission.edit = !resources.has("编辑角色")
+                    this.permission.save = !resources.has("保存权限")
+                }
+            },
         },
         mounted() {
             this.getRoles();
+            this.getResources()
         }
     }
     ;
@@ -226,6 +305,10 @@
 <style scoped>
     .handle-box {
         margin-bottom: 20px;
+    }
+
+    .container {
+        height: 500px;
     }
 
     .content {
@@ -244,6 +327,7 @@
         border-style: solid;
         border-width: 2px;
         border-color: #f1f3f8;
+        height: 425px;
         flex: 0 0 300px;
     }
 
@@ -251,6 +335,7 @@
         border-style: solid;
         border-width: 2px;
         border-color: #f1f3f8;
+        height: 425px;
         flex: 0 0 300px;
     }
 
